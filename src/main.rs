@@ -11,8 +11,8 @@ extern crate rss;
 use blinkt::Blinkt;
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use regex::Regex;
+use std::cmp;
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::io::BufReader;
 use std::process::Command;
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
@@ -185,12 +185,13 @@ fn sightings_mainloop(blinkt_tx: Sender<BlinktCommand>, sigint_rx: Receiver<()>)
         for sighting in sightings {
             let event_ts = sighting.datetime.timestamp();
             let time_to_event = event_ts - Utc::now().timestamp();
-            info!("event at {} ({} sec)", sighting.datetime, time_to_event);
             if time_to_event < 0 {
+                debug!("Ignoring past event {}", sighting.datetime);
                 continue;
             }
-            let wait_duration = (time_to_event - NOTIFY_DURATION).try_into().unwrap();
+            let wait_duration = cmp::max(time_to_event - NOTIFY_DURATION, 0) as u64;
             let wait_duration = Duration::from_secs(wait_duration);
+            info!("Next sighting in {} sec, {:#?}", time_to_event, sighting);
             match sigint_rx.recv_timeout(wait_duration) {
                 Err(RecvTimeoutError::Timeout) => {
                     info!("Sending ISS notification");
@@ -215,7 +216,7 @@ fn init_logger() {
                 message
             ))
         })
-        .level(log::LevelFilter::Debug)
+        .level(log::LevelFilter::Info)
         .chain(std::io::stdout())
         .chain(fern::log_file("iss-notify.log").unwrap())
         .apply()
