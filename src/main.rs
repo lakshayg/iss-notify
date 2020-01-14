@@ -22,6 +22,9 @@ use std::time::Duration;
 static NOTIFY_DURATION: i64 = 300; // 5min to seconds
 static BLINKT_REFRESH_DURATION: Duration = Duration::from_millis(1000);
 static BLINKT_BRIGHTNESS: f32 = 0.05;
+static LOCAL_TZ: chrono_tz::Tz = chrono_tz::Tz::America__Los_Angeles;
+static RSS_URL: &str =
+    "https://spotthestation.nasa.gov/sightings/xml_files/United_States_California_Redwood_City.xml";
 
 #[derive(Debug)]
 enum CurlError {
@@ -91,7 +94,7 @@ fn rss_item_to_map(item: &rss::Item) -> HashMap<String, String> {
 
 fn map_to_sighting(map: &HashMap<String, String>) -> Sighting {
     let datetime_str = format!("{} {}", map["Date"], map["Time"]);
-    let datetime = chrono_tz::Tz::America__Los_Angeles
+    let datetime = LOCAL_TZ
         .from_local_datetime(&parse_datetime(&datetime_str))
         .unwrap();
     Sighting {
@@ -104,7 +107,7 @@ fn map_to_sighting(map: &HashMap<String, String>) -> Sighting {
 }
 
 fn get_sightings() -> Vec<Sighting> {
-    let result = curl("https://spotthestation.nasa.gov/sightings/xml_files/United_States_California_Redwood_City.xml").unwrap();
+    let result = curl(RSS_URL).unwrap();
     let channel = rss::Channel::read_from(BufReader::new(result.as_slice())).unwrap();
     let iter = channel.items().iter();
     let mut vec: Vec<_> = iter
@@ -180,7 +183,7 @@ fn blinkt_mainloop(blinkt_rx: Receiver<BlinktCommand>) {
 
 fn sightings_mainloop(blinkt_tx: Sender<BlinktCommand>, sigint_rx: Receiver<()>) {
     loop {
-        info!("Retrieving RSS feed from spotthestation.nasa.gov");
+        info!("Retrieving RSS feed from {}", RSS_URL);
         let sightings = get_sightings();
         for sighting in sightings {
             let event_ts = sighting.datetime.timestamp();
