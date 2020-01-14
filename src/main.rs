@@ -12,9 +12,10 @@ use blinkt::Blinkt;
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use regex::Regex;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::io::BufReader;
 use std::process::Command;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -188,19 +189,18 @@ fn sightings_mainloop(blinkt_tx: Sender<BlinktCommand>, sigint_rx: Receiver<()>)
             if time_to_event < 0 {
                 continue;
             }
-            loop {
-                if sigint_rx.try_recv().is_ok() {
-                    return; // signal received, exiting
+            let wait_duration = (time_to_event - NOTIFY_DURATION).try_into().unwrap();
+            let wait_duration = Duration::from_secs(wait_duration);
+            match sigint_rx.recv_timeout(wait_duration) {
+                Err(RecvTimeoutError::Timeout) => {
+                    info!("Sending ISS notification");
+                    blinkt_tx
+                        .send(BlinktCommand::IssApproching(event_ts))
+                        .unwrap();
                 }
-                if Utc::now().timestamp() > event_ts - NOTIFY_DURATION {
-                    break;
-                }
-                thread::sleep(Duration::from_secs(1));
+                Err(RecvTimeoutError::Disconnected) => panic!("impossible"),
+                Ok(()) => return, // signal received, exiting
             }
-            info!("Sending ISS notification");
-            blinkt_tx
-                .send(BlinktCommand::IssApproching(event_ts))
-                .unwrap();
         }
     }
 }
@@ -218,7 +218,8 @@ fn init_logger() {
         .level(log::LevelFilter::Debug)
         .chain(std::io::stdout())
         .chain(fern::log_file("iss-notify.log").unwrap())
-        .apply().unwrap();
+        .apply()
+        .unwrap();
 }
 
 fn main() {
