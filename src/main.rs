@@ -1,7 +1,10 @@
+#[macro_use]
+extern crate log;
 extern crate blinkt;
 extern crate chrono;
 extern crate chrono_tz;
 extern crate ctrlc;
+extern crate fern;
 extern crate regex;
 extern crate rss;
 
@@ -118,6 +121,7 @@ enum BlinktCommand {
 }
 
 fn terminate(blinkt: &mut Blinkt) {
+    warn!("Blinkt received Terminate");
     blinkt.set_all_pixels(0, 0, 0);
     blinkt.set_pixel(0, 255, 0, 0);
     blinkt.show().unwrap();
@@ -140,6 +144,7 @@ fn color(n: i32, i: usize) -> (u8, u8, u8) {
 }
 
 fn iss_approaching(blinkt: &mut Blinkt, until: i64) {
+    info!("Blinkt received IssApproaching");
     while Utc::now().timestamp() < until {
         for n in (0..360).step_by(3) {
             for i in 0..8 as usize {
@@ -174,16 +179,12 @@ fn blinkt_mainloop(blinkt_rx: Receiver<BlinktCommand>) {
 
 fn sightings_mainloop(blinkt_tx: Sender<BlinktCommand>, sigint_rx: Receiver<()>) {
     loop {
+        info!("Retrieving RSS feed from spotthestation.nasa.gov");
         let sightings = get_sightings();
         for sighting in sightings {
             let event_ts = sighting.datetime.timestamp();
             let time_to_event = event_ts - Utc::now().timestamp();
-            println!(
-                "Current time: {}, Next event: {}, time to event: {}",
-                Utc::now(),
-                sighting.datetime,
-                time_to_event
-            );
+            info!("event at {} ({} sec)", sighting.datetime, time_to_event);
             if time_to_event < 0 {
                 continue;
             }
@@ -196,7 +197,7 @@ fn sightings_mainloop(blinkt_tx: Sender<BlinktCommand>, sigint_rx: Receiver<()>)
                 }
                 thread::sleep(Duration::from_secs(1));
             }
-            println!("  Sending ISS notification");
+            info!("Sending ISS notification");
             blinkt_tx
                 .send(BlinktCommand::IssApproching(event_ts))
                 .unwrap();
@@ -204,13 +205,31 @@ fn sightings_mainloop(blinkt_tx: Sender<BlinktCommand>, sigint_rx: Receiver<()>)
     }
 }
 
+fn init_logger() {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{}:{} {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                message
+            ))
+        })
+        .level(log::LevelFilter::Debug)
+        .chain(std::io::stdout())
+        .chain(fern::log_file("iss-notify.log").unwrap())
+        .apply().unwrap();
+}
+
 fn main() {
+    init_logger();
+
     let (blinkt_tx, blinkt_rx) = channel();
     let blinkt_tx2 = blinkt_tx.clone();
     let (sigint_tx, sigint_rx) = channel();
 
     ctrlc::set_handler(move || {
-        println!("Signal received, exiting");
+        warn!("Signal received, exiting");
         blinkt_tx.send(BlinktCommand::Terminate).unwrap();
         sigint_tx.send(()).unwrap();
     })
