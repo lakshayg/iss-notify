@@ -20,7 +20,7 @@ use std::thread;
 use std::time::Duration;
 
 static NOTIFY_DURATION: i64 = 300; // 5min to seconds
-static BLINKT_REFRESH_DURATION: u64 = 1000; // 1sec in millis
+static BLINKT_REFRESH_DURATION: Duration = Duration::from_millis(1000);
 static BLINKT_BRIGHTNESS: f32 = 0.05;
 
 #[derive(Debug)]
@@ -166,15 +166,15 @@ fn blinkt_mainloop(blinkt_rx: Receiver<BlinktCommand>) {
     blinkt.set_all_pixels_brightness(BLINKT_BRIGHTNESS);
     let mut heartbeat_state: u8 = 0;
     loop {
-        match blinkt_rx.try_recv() {
-            Err(_) => heartbeat(&mut blinkt, &mut heartbeat_state),
+        match blinkt_rx.recv_timeout(BLINKT_REFRESH_DURATION) {
+            Err(RecvTimeoutError::Disconnected) => panic!("blinkt_rx closed unexpectedly"),
+            Err(RecvTimeoutError::Timeout) => heartbeat(&mut blinkt, &mut heartbeat_state),
             Ok(BlinktCommand::IssApproching(when)) => iss_approaching(&mut blinkt, when),
             Ok(BlinktCommand::Terminate) => {
                 terminate(&mut blinkt);
                 return;
             }
         }
-        thread::sleep(Duration::from_millis(BLINKT_REFRESH_DURATION));
     }
 }
 
