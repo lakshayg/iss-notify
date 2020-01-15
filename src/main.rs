@@ -119,7 +119,7 @@ fn get_sightings() -> Vec<Sighting> {
     vec
 }
 
-enum BlinktCommand {
+enum BlinktCmd {
     IssApproching(i64), // unix ts indicating the time of arrival
     Terminate,
 }
@@ -163,7 +163,7 @@ fn iss_approaching(blinkt: &mut Blinkt, until: i64) {
     blinkt.show().unwrap();
 }
 
-fn blinkt_mainloop(blinkt_rx: Receiver<BlinktCommand>) {
+fn blinkt_mainloop(blinkt_rx: Receiver<BlinktCmd>) {
     let mut blinkt = blinkt::Blinkt::new().unwrap();
     blinkt.set_clear_on_drop(false);
     blinkt.set_all_pixels_brightness(BLINKT_BRIGHTNESS);
@@ -172,8 +172,8 @@ fn blinkt_mainloop(blinkt_rx: Receiver<BlinktCommand>) {
         match blinkt_rx.recv_timeout(BLINKT_REFRESH_DURATION) {
             Err(RecvTimeoutError::Disconnected) => panic!("blinkt_rx closed unexpectedly"),
             Err(RecvTimeoutError::Timeout) => heartbeat(&mut blinkt, &mut heartbeat_state),
-            Ok(BlinktCommand::IssApproching(when)) => iss_approaching(&mut blinkt, when),
-            Ok(BlinktCommand::Terminate) => {
+            Ok(BlinktCmd::IssApproching(when)) => iss_approaching(&mut blinkt, when),
+            Ok(BlinktCmd::Terminate) => {
                 terminate(&mut blinkt);
                 return;
             }
@@ -181,7 +181,7 @@ fn blinkt_mainloop(blinkt_rx: Receiver<BlinktCommand>) {
     }
 }
 
-fn sightings_mainloop(blinkt_tx: Sender<BlinktCommand>, sigint_rx: Receiver<()>) {
+fn sightings_mainloop(blinkt_tx: Sender<BlinktCmd>, sigint_rx: Receiver<()>) {
     loop {
         info!("Retrieving RSS feed from {}", RSS_URL);
         let sightings = get_sightings();
@@ -196,14 +196,15 @@ fn sightings_mainloop(blinkt_tx: Sender<BlinktCommand>, sigint_rx: Receiver<()>)
             let wait_duration = Duration::from_secs(wait_duration);
             info!("Next sighting in {} sec, {:#?}", time_to_event, sighting);
             match sigint_rx.recv_timeout(wait_duration) {
+                Err(RecvTimeoutError::Disconnected) => panic!("sigint_tx closed unexpectedly"),
                 Err(RecvTimeoutError::Timeout) => {
                     info!("Sending ISS notification");
-                    blinkt_tx
-                        .send(BlinktCommand::IssApproching(event_ts))
-                        .unwrap();
+                    blinkt_tx.send(BlinktCmd::IssApproching(event_ts)).unwrap();
                 }
-                Err(RecvTimeoutError::Disconnected) => panic!("impossible"),
-                Ok(()) => return, // signal received, exiting
+                Ok(()) => {
+                    blinkt_tx.send(BlinktCmd::Terminate).unwrap();
+                    return; // signal received, exiting
+                }
             }
         }
     }
@@ -230,12 +231,10 @@ fn main() {
     init_logger();
 
     let (blinkt_tx, blinkt_rx) = channel();
-    let blinkt_tx2 = blinkt_tx.clone();
     let (sigint_tx, sigint_rx) = channel();
 
     ctrlc::set_handler(move || {
         warn!("Signal received, exiting");
-        blinkt_tx.send(BlinktCommand::Terminate).unwrap();
         sigint_tx.send(()).unwrap();
     })
     .unwrap();
@@ -244,7 +243,7 @@ fn main() {
         blinkt_mainloop(blinkt_rx);
     });
 
-    sightings_mainloop(blinkt_tx2, sigint_rx);
+    sightings_mainloop(blinkt_tx, sigint_rx);
 
     blinkt_handle.join().unwrap();
 }
