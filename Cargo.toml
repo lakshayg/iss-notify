@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["lakshayg <lakshayg@outlook.in>"]
 
 [dependencies]
-blinkt = "0.5.0"
+blinkt = { version = "0.5.0", optional = true }
 chrono = "0.4"
 chrono-tz = "0.4"
 ctrlc = { version = "3.0", features = ["termination"] }
@@ -13,7 +13,17 @@ log = "0.4.8"
 regex = "1"
 rss = "1.0"
 
+[features]
+# By default, we assume that the binary is being built for a
+# raspberry pi equipped with a Pimoroni Blinkt!. It is often
+# desirable to build the binary on other machines for testing
+# purposes. Since the blinkt drivers require a Rpi, iss-notify
+# comes with a mock blinkt class to support such cases. To use
+# the mock implementation the --no-default-features flag must
+# be passed to cargo when building
+default = ["blinkt"]
+
 [profile.release]
-opt-level = 3
+opt-level = "z"
 lto = true
 codegen-units = 1

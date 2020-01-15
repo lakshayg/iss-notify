@@ -1,6 +1,5 @@
 #[macro_use]
 extern crate log;
-extern crate blinkt;
 extern crate chrono;
 extern crate chrono_tz;
 extern crate ctrlc;
@@ -8,7 +7,9 @@ extern crate fern;
 extern crate regex;
 extern crate rss;
 
-use blinkt::Blinkt;
+mod blinkt_compat;
+
+use blinkt_compat::{Blinkt, BlinktT};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use regex::Regex;
 use std::cmp;
@@ -124,14 +125,14 @@ enum BlinktCmd {
     Terminate,
 }
 
-fn terminate(blinkt: &mut Blinkt) {
+fn terminate(blinkt: &mut dyn BlinktT) {
     warn!("Blinkt received Terminate");
     blinkt.set_all_pixels(0, 0, 0);
     blinkt.set_pixel(0, 255, 0, 0);
     blinkt.show().unwrap();
 }
 
-fn heartbeat(blinkt: &mut Blinkt, heartbeat_state: &mut u8) {
+fn heartbeat(blinkt: &mut dyn BlinktT, heartbeat_state: &mut u8) {
     *heartbeat_state = 255 as u8 - *heartbeat_state;
     blinkt.set_all_pixels(0, 0, 0);
     blinkt.set_pixel(0, 0, *heartbeat_state, 0);
@@ -147,7 +148,7 @@ fn color(n: i32, i: usize) -> (u8, u8, u8) {
     (r as u8, g as u8, b as u8)
 }
 
-fn iss_approaching(blinkt: &mut Blinkt, until: i64) {
+fn iss_approaching(blinkt: &mut dyn BlinktT, until: i64) {
     info!("Blinkt received IssApproaching");
     while Utc::now().timestamp() < until {
         for n in (0..360).step_by(3) {
@@ -164,7 +165,7 @@ fn iss_approaching(blinkt: &mut Blinkt, until: i64) {
 }
 
 fn blinkt_mainloop(blinkt_rx: Receiver<BlinktCmd>) {
-    let mut blinkt = blinkt::Blinkt::new().unwrap();
+    let mut blinkt = Blinkt::new().unwrap();
     blinkt.set_clear_on_drop(false);
     blinkt.set_all_pixels_brightness(BLINKT_BRIGHTNESS);
     let mut heartbeat_state: u8 = 0;
