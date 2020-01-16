@@ -1,7 +1,7 @@
 extern crate blinkt;
 
-use super::blinkt_common::{BlinktT, Result};
 use self::blinkt::Blinkt;
+use super::blinkt_common::{BlinktT, Result};
 use log::error;
 
 pub struct BlinktReal {

@@ -1,21 +1,15 @@
 #[macro_use]
 extern crate log;
 extern crate chrono;
-extern crate chrono_tz;
 extern crate ctrlc;
 extern crate fern;
-extern crate regex;
-extern crate rss;
 
 mod blinkt_compat;
+mod iss_feed;
 
 use blinkt_compat::{Blinkt, BlinktT};
-use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
-use regex::Regex;
+use chrono::Utc;
 use std::cmp;
-use std::collections::HashMap;
-use std::io::BufReader;
-use std::process::Command;
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
@@ -23,102 +17,6 @@ use std::time::Duration;
 static NOTIFY_DURATION: i64 = 300; // 5min to seconds
 static BLINKT_REFRESH_DURATION: Duration = Duration::from_millis(1000);
 static BLINKT_BRIGHTNESS: f32 = 0.05;
-static LOCAL_TZ: chrono_tz::Tz = chrono_tz::Tz::America__Los_Angeles;
-static RSS_URL: &str =
-    "https://spotthestation.nasa.gov/sightings/xml_files/United_States_California_Redwood_City.xml";
-
-#[derive(Debug)]
-enum CurlError {
-    Code(i32),
-    TerminatedBySignal,
-}
-
-#[derive(Debug)]
-struct Sighting {
-    datetime: DateTime<chrono_tz::Tz>,
-    approach: SkyLocation,
-    departure: SkyLocation,
-    duration: i32,      // time for which ISS is visible in minutes
-    max_elevation: i32, // max elevation in degrees
-}
-
-#[derive(Debug)]
-struct SkyLocation {
-    direction: String, // compass direction
-    elevation: i32,    // angle in degrees measured from horizon
-}
-
-fn parse_datetime(s: &str) -> NaiveDateTime {
-    NaiveDateTime::parse_from_str(s, "%A %b %d, %Y %l:%M %p").unwrap()
-}
-
-fn parse_skylocation(s: &str) -> SkyLocation {
-    let regex = Regex::new(r"(?P<elevation>[0-9]+)° above (?P<direction>[NSEW]+)").unwrap();
-    let caps = regex.captures(s).unwrap();
-    SkyLocation {
-        direction: caps["direction"].to_string(),
-        elevation: caps["elevation"].parse().unwrap(),
-    }
-}
-
-fn parse_duration(s: &str) -> i32 {
-    let regex = Regex::new(r"(?P<duration>[0-9]+) minute").unwrap();
-    let caps = regex.captures(s).unwrap();
-    caps["duration"].parse().unwrap()
-}
-
-fn parse_elevation(s: &str) -> i32 {
-    s.trim_end_matches("°").parse().unwrap()
-}
-
-fn curl(url: &str) -> Result<Vec<u8>, CurlError> {
-    let out = Command::new("curl")
-        .arg(url)
-        .output()
-        .expect("Error invoking curl");
-    match out.status.code() {
-        Some(0) => Ok(out.stdout),
-        Some(i) => Err(CurlError::Code(i)),
-        None => Err(CurlError::TerminatedBySignal),
-    }
-}
-
-fn rss_item_to_map(item: &rss::Item) -> HashMap<String, String> {
-    let desc = item.description().unwrap();
-    desc.split('\n')
-        .map(|s| s.trim_start_matches('\t'))
-        .map(|s| s.trim_end_matches(" <br/>"))
-        .map(|s| s.splitn(2, ": ").collect())
-        .map(|s: Vec<_>| (s[0].to_string(), s[1].to_string()))
-        .collect()
-}
-
-fn map_to_sighting(map: &HashMap<String, String>) -> Sighting {
-    let datetime_str = format!("{} {}", map["Date"], map["Time"]);
-    let datetime = LOCAL_TZ
-        .from_local_datetime(&parse_datetime(&datetime_str))
-        .unwrap();
-    Sighting {
-        datetime,
-        approach: parse_skylocation(&map["Approach"]),
-        departure: parse_skylocation(&map["Departure"]),
-        duration: parse_duration(&map["Duration"]),
-        max_elevation: parse_elevation(&map["Maximum Elevation"]),
-    }
-}
-
-fn get_sightings() -> Vec<Sighting> {
-    let result = curl(RSS_URL).unwrap();
-    let channel = rss::Channel::read_from(BufReader::new(result.as_slice())).unwrap();
-    let iter = channel.items().iter();
-    let mut vec: Vec<_> = iter
-        .filter(|item| item.title().unwrap().contains("ISS Sighting"))
-        .map(|item| rss_item_to_map(&item))
-        .map(|map| map_to_sighting(&map))
-        .collect();
-    vec.sort_by(|a, b| a.datetime.cmp(&b.datetime));
-    vec
-}
 
 enum BlinktCmd {
     IssApproching(i64), // unix ts indicating the time of arrival
@@ -184,8 +82,8 @@ fn blinkt_mainloop(blinkt_rx: Receiver<BlinktCmd>) {
 
 fn sightings_mainloop(blinkt_tx: Sender<BlinktCmd>, sigint_rx: Receiver<()>) {
     loop {
-        info!("Retrieving RSS feed from {}", RSS_URL);
-        let sightings = get_sightings();
+        info!("Retrieving RSS feed");
+        let sightings = iss_feed::get_sightings();
         for sighting in sightings {
             let event_ts = sighting.datetime.timestamp();
             let time_to_event = event_ts - Utc::now().timestamp();
