@@ -16,7 +16,8 @@ use std::time::Duration;
 
 static NOTIFY_DURATION: i64 = 300; // 5min to seconds
 static BLINKT_REFRESH_DURATION: Duration = Duration::from_millis(1000);
-static BLINKT_BRIGHTNESS: f32 = 0.05;
+static BLINKT_DEFAULT_BRIGHTNESS: f32 = 0.05;
+static BLINKT_MAX_BRIGHTNESS: f32 = 1.0;
 
 enum BlinktCmd {
     IssApproching(i64), // unix ts indicating the time of arrival
@@ -48,6 +49,7 @@ fn color(n: i32, i: usize) -> (u8, u8, u8) {
 
 fn iss_approaching(blinkt: &mut dyn BlinktT, until: i64) {
     info!("Blinkt received IssApproaching");
+    blinkt.set_all_pixels_brightness(BLINKT_MAX_BRIGHTNESS);
     while Utc::now().timestamp() < until {
         for n in (0..360).step_by(3) {
             for i in 0..8 as usize {
@@ -59,13 +61,14 @@ fn iss_approaching(blinkt: &mut dyn BlinktT, until: i64) {
         }
     }
     blinkt.clear();
+    blinkt.set_all_pixels_brightness(BLINKT_DEFAULT_BRIGHTNESS);
     blinkt.show().unwrap();
 }
 
 fn blinkt_mainloop(blinkt_rx: Receiver<BlinktCmd>) {
     let mut blinkt = Blinkt::new().unwrap();
     blinkt.set_clear_on_drop(false);
-    blinkt.set_all_pixels_brightness(BLINKT_BRIGHTNESS);
+    blinkt.set_all_pixels_brightness(BLINKT_DEFAULT_BRIGHTNESS);
     let mut heartbeat_state: u8 = 0;
     loop {
         match blinkt_rx.recv_timeout(BLINKT_REFRESH_DURATION) {
