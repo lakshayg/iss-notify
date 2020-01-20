@@ -18,6 +18,7 @@ const RSS_URL: &str =
 #[derive(Debug)]
 pub enum CurlError {
     Code(i32),
+    CouldntResolveHost,
     TerminatedBySignal,
 }
 
@@ -66,6 +67,7 @@ fn curl(url: &str) -> Result<Vec<u8>, CurlError> {
         .expect("Error invoking curl");
     match out.status.code() {
         Some(0) => Ok(out.stdout),
+        Some(6) => Err(CurlError::CouldntResolveHost),
         Some(i) => Err(CurlError::Code(i)),
         None => Err(CurlError::TerminatedBySignal),
     }
@@ -96,8 +98,8 @@ fn map_to_sighting(map: &HashMap<String, String>) -> Sighting {
     }
 }
 
-pub fn get_sightings() -> Vec<Sighting> {
-    let result = curl(RSS_URL).unwrap();
+pub fn get_sightings() -> Result<Vec<Sighting>, CurlError> {
+    let result = curl(RSS_URL)?;
     let channel = rss::Channel::read_from(BufReader::new(result.as_slice())).unwrap();
     let iter = channel.items().iter();
     let mut vec: Vec<_> = iter
@@ -106,5 +108,5 @@ pub fn get_sightings() -> Vec<Sighting> {
         .map(|map| map_to_sighting(&map))
         .collect();
     vec.sort_by(|a, b| a.datetime.cmp(&b.datetime));
-    vec
+    Ok(vec)
 }

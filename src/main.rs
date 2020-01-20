@@ -87,7 +87,21 @@ fn sightings_mainloop(blinkt_tx: Sender<BlinktCmd>, sigint_rx: Receiver<()>) {
     loop {
         info!("Retrieving RSS feed");
         let sightings = iss_feed::get_sightings();
-        for sighting in sightings {
+
+        // TODO: send blinkt command to indicate error
+        if sightings.is_err() {
+            error!("{:?}, trying again in 1min", sightings.unwrap_err());
+            match sigint_rx.recv_timeout(Duration::from_secs(60)) {
+                Err(RecvTimeoutError::Disconnected) => panic!("sigint_tx closed unexpectedly"),
+                Err(RecvTimeoutError::Timeout) => continue,
+                Ok(()) => {
+                    blinkt_tx.send(BlinktCmd::Terminate).unwrap();
+                    return; // signal received, exiting
+                }
+            }
+        }
+
+        for sighting in sightings.unwrap() {
             let event_ts = sighting.datetime.timestamp();
             let time_to_event = event_ts - Utc::now().timestamp();
             if time_to_event < 0 {
