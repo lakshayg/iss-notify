@@ -2,14 +2,17 @@ extern crate chrono;
 extern crate chrono_tz;
 extern crate regex;
 
-use chrono::{DateTime, NaiveDateTime, TimeZone};
+use self::chrono_tz::Tz;
 use self::regex::Regex;
+use chrono::{DateTime, NaiveDateTime, TimeZone};
 use std::collections::HashMap;
 use std::io::BufReader;
 use std::process::Command;
+use std::str::FromStr;
 
-static LOCAL_TZ: chrono_tz::Tz = chrono_tz::Tz::America__Los_Angeles;
-static RSS_URL: &str =
+// TODO: Remove hardcoded timezone and location
+const LOCAL_TZ: &str = "America/Los_Angeles";
+const RSS_URL: &str =
     "https://spotthestation.nasa.gov/sightings/xml_files/United_States_California_Redwood_City.xml";
 
 #[derive(Debug)]
@@ -20,7 +23,7 @@ pub enum CurlError {
 
 #[derive(Debug)]
 pub struct Sighting {
-    pub datetime: DateTime<chrono_tz::Tz>,
+    pub datetime: DateTime<Tz>,
     pub approach: SkyLocation,
     pub departure: SkyLocation,
     pub duration: i32,      // time for which ISS is visible in minutes
@@ -80,7 +83,8 @@ fn rss_item_to_map(item: &rss::Item) -> HashMap<String, String> {
 
 fn map_to_sighting(map: &HashMap<String, String>) -> Sighting {
     let datetime_str = format!("{} {}", map["Date"], map["Time"]);
-    let datetime = LOCAL_TZ
+    let datetime = Tz::from_str(LOCAL_TZ)
+        .unwrap()
         .from_local_datetime(&parse_datetime(&datetime_str))
         .unwrap();
     Sighting {
